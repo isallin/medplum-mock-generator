@@ -71,51 +71,49 @@ def authentication_medplum():
     response = requests.post(token_url, data=data)
     return response.json()["access_token"]
 
-def batch_bundle(size=100) -> dict:
-    entries = []
-    for _ in range(size):
-        patient_data = generate_patient()
-        entries.append({
+def generate_bundle(patients):
+    bundle = {
+        "resourceType": "Bundle",
+        "type": "transaction",
+        "entry": []
+    }
+
+    for patient in patients:
+        entry = {
+            "resource": patient,
             "request": {
                 "method": "POST",
                 "url": "Patient"
-            },
-            "resource": patient_data
-        })
-        
-    return {
-        "resourceType": "Bundle",
-        "type": "batch",
-        "entry": entries
-    }
+            }
+        }
+        bundle["entry"].append(entry)
 
-def send_batch_data(token, bundle):
+    return bundle
+
+def send_data(token, bundle):
     response = requests.post(
-        f"{base_url}/fhir/R4/Patient",
+        f"{base_url}/fhir/R4",
         json=bundle,
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/fhir+json",
             "accept": "application/fhir+json",
         },
-        timeout=10,
+        timeout=30,
     )
     response.raise_for_status()
     return response.json()
 
-
 def main():
-    for i in range(2):
-        print(f"Generating patient {i + 1}º...")
+    for i in range(10):
         try:
             token = authentication_medplum()
-            bundle = batch_bundle(size=100)
-            data = send_batch_data(token, bundle)
-            print(f"Patient {i + 1}º generated successfully!")
-            print(f"ID: {data.get('id')}")
-            print(f"lastUpdated: {data.get('meta', {}).get('lastUpdated')}")
+            patients = [generate_patient() for _ in range(50)]
+            bundle = generate_bundle(patients)
+            data = send_data(token, bundle)
+            print(f"Bundle {i + 1}º generated successfully!")
         except Exception as e:
-            print(f"An error occurred while generating patient {i + 1}º: {e}")
+            print(f"An error occurred while generating bundle {i + 1}º: {e}")
 
 if __name__ == "__main__":
     main()
