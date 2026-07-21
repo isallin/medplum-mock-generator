@@ -1,7 +1,7 @@
 import random
 import requests
-from config import BASE_URL, CLIENT_ID, CLIENT_SECRET, PROJECT_ID
-from generators import generate_patient, generate_procedure, generate_bundle
+from config import BASE_URL, CLIENT_ID, CLIENT_SECRET, PROJECT_ID, BATCH_SIZE, TOTAL_PATIENTS, TOTAL_PROCEDURES
+from generators import generate_patient, generate_procedure, generate_bundle, chunk_list
 
 def authentication_medplum(session: requests.Session) -> str:
     token_url = f"{BASE_URL}/oauth2/token"
@@ -15,7 +15,6 @@ def authentication_medplum(session: requests.Session) -> str:
     response = session.post(token_url, data=data, headers=headers)
     response.raise_for_status()
     return response.json()["access_token"]
-
 
 def get_random_patient(session: requests.Session, token: str) -> tuple[str, str]:
     headers = {
@@ -44,16 +43,10 @@ def get_random_patient(session: requests.Session, token: str) -> tuple[str, str]
 
     patient_resource = entries[0]["resource"]
     patient_id = patient_resource["id"]
-    
-    # Busca o primeiro nome com segurança
-    patient_name = "Desconhecido"
-    if "name" in patient_resource and len(patient_resource["name"]) > 0:
-        given_list = patient_resource["name"][0].get("given", [])
-        if given_list:
-            patient_name = given_list[0]
+    patient_list = patient_resource["name"][0].get("given", [])
+    patient_name = patient_list[0]
 
     return patient_id, patient_name
-
 
 def send_bundle(session: requests.Session, token: str, bundle: dict) -> dict:
     response = session.post(
@@ -64,11 +57,10 @@ def send_bundle(session: requests.Session, token: str, bundle: dict) -> dict:
             "Content-Type": "application/fhir+json",
             "accept": "application/fhir+json",
         },
-        timeout=30,
+        timeout=30
     )
     response.raise_for_status()
     return response.json()
-
 
 def main():
     with requests.Session() as session:
@@ -79,28 +71,32 @@ def main():
             print(f"Falha ao autenticar: {e}")
             return
 
-        try:
-            patients = [generate_patient() for _ in range(10)]
-            bundle = generate_bundle(patients, "Patient")
-            send_bundle(session, token, bundle)
-            print("10 Pacientes enviados!")
-        except Exception as e:
-            print(f"Erro ao enviar pacientes: {e}")
+        patients = [generate_patient() for _ in range(TOTAL_PATIENTS)]
+        for i, batch in enumerate(chunk_list(patients, BATCH_SIZE), start=1):
+            try:
+                patient_bundle = generate_bundle(batch, "Patient")
+                send_bundle(session, token, patient_bundle)
+                print(f"Lote {i} enviado com sucesso ({len(batch)} pacientes)!")
+            except Exception as e:
+                print(f"Erro no envio do Lote {i}: {e}")
 
         procedures = []
-        for _ in range(2):
+        for _ in range(TOTAL_PROCEDURES):
             try:
                 p_id, p_name = get_random_patient(session, token)
-                print(f"Sorteado: {p_name} ({p_id})")
                 proc = generate_procedure(p_id, p_name)
                 procedures.append(proc)
             except Exception as e:
-                print(f"Erro ao sortear paciente: {e}")
+                print(f"Erro ao sortear paciente para procedure: {e}")
 
         if procedures:
-            proc_bundle = generate_bundle(procedures, "Procedure")
-            send_bundle(session, token, proc_bundle)
-            print("Procedures enviadas com sucesso!")
+            for i, batch in enumerate(chunk_list(procedures, BATCH_SIZE), start=1):
+                try:
+                    proc_bundle = generate_bundle(batch, "Procedure")
+                    send_bundle(session, token, proc_bundle)
+                    print(f"Lote {i} de Procedures enviado com sucesso ({len(batch)} itens)!")
+                except Exception as e:
+                    print(f"Erro ao enviar o lote {i} de Procedures: {e}")
 
 
 if __name__ == "__main__":

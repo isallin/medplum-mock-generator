@@ -1,18 +1,19 @@
 import random
-from datetime import date
+from datetime import date, timezone
 from faker import Faker
 from config import (
-    P_EXHIGH, P_HIGH, P_MID, P_EXLOW,
-    gender_elements, gender_weights,
-    maritage_elements, maritage_weights,
-    procedure_stat, procedure_stat_weights,
-    snomed_procedures, draw
+    P_EXHIGH, P_HIGH, P_MID, P_LOW, P_EXLOW,
+    GENDER_ELEMENTS, GENDER_WEIGHTS,
+    MARITAGE_ELEMENTS, MARITAGE_WEIGHTS,
+    PROCEDURE_STAT, PROCEDURE_STAT_WEIGHTS,
+    SNOMED_PROCEDURES, PROCEDURE_CATEGORIES, 
+    PROCEDURE_REASON_CODES, draw
 )
 
 fake = Faker("pt_BR")
 
 def generate_patient() -> dict:
-    selected_gender = draw(gender_elements, gender_weights)
+    selected_gender = draw(GENDER_ELEMENTS, GENDER_WEIGHTS)
     if selected_gender == "male":
         first_name = fake.first_name_male()
     elif selected_gender == "female":
@@ -85,7 +86,7 @@ def generate_patient() -> dict:
 
     minimal_age = date.today().replace(year=date.today().year - 18)
     if patient_birth and patient_birth <= minimal_age and random.random() < P_HIGH:
-        mrt = draw(maritage_elements, maritage_weights)
+        mrt = draw(MARITAGE_ELEMENTS, MARITAGE_WEIGHTS)
         patient["maritalStatus"] = {
             "coding": [{
                 "system": "http://terminology.hl7.org/CodeSystem/v3-MaritalStatus",
@@ -96,12 +97,12 @@ def generate_patient() -> dict:
 
     return patient
 
-
 def generate_procedure(patient_id: str, patient_name: str) -> dict:
-    selected_code = random.choice(snomed_procedures)
-    return {
+    selected_code = random.choice(SNOMED_PROCEDURES)
+    
+    procedure = {
         "resourceType": "Procedure",
-        "status": draw(procedure_stat, procedure_stat_weights),
+        "status": draw(PROCEDURE_STAT, PROCEDURE_STAT_WEIGHTS),
         "code": {
             "coding": [{
                 "system": "http://snomed.info/sct",
@@ -115,6 +116,49 @@ def generate_procedure(patient_id: str, patient_name: str) -> dict:
         }
     }
 
+    if random.random() < P_EXHIGH:
+        procedure["identifier"] = [{
+            "use": "official",
+            "system": "http://saude.goias.gov/procedimentos",
+            "value": fake.numerify("########")
+        }]
+
+    if random.random() < P_HIGH:
+        category = random.choice(PROCEDURE_CATEGORIES)
+        procedure["category"] = {
+            "coding": [{
+                "system": "http://snomed.info/sct",
+                "code": category["code"],
+                "display": category["display"]
+            }]
+        }
+
+    if random.random() < P_EXHIGH:
+        dt_performed = fake.date_time_between(start_date="-2y", end_date="now", tzinfo=timezone.utc)
+        procedure["performedDateTime"] = dt_performed.isoformat()
+
+    if random.random() < P_MID:
+        reason = random.choice(PROCEDURE_REASON_CODES)
+        procedure["reasonCode"] = [{
+            "coding": [{
+                "system": "http://snomed.info/sct",
+                "code": reason["code"],
+                "display": reason["display"]
+            }]
+        }]
+
+    if random.random() < P_MID:
+        procedure["location"] = {
+            "display": f"Hospital {fake.company()}"
+        }
+
+    if random.random() < P_LOW:
+        procedure["note"] = [{
+            "text": fake.sentence(nb_words=10)
+        }]
+
+    return procedure
+
 def generate_bundle(resources: list, resource_type: str) -> dict:
     bundle = {"resourceType": "Bundle", "type": "transaction", "entry": []}
     for res in resources:
@@ -125,3 +169,6 @@ def generate_bundle(resources: list, resource_type: str) -> dict:
         bundle["entry"].append(entry)
     return bundle
 
+def chunk_list(data: list, size: int):
+    for i in range(0, len(data), size):
+        yield data[i:i + size]
