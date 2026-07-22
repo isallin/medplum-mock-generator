@@ -1,7 +1,8 @@
 import random
 import requests
-from config import BASE_URL, CLIENT_ID, CLIENT_SECRET, PROJECT_ID, BATCH_SIZE, TOTAL_PATIENTS, TOTAL_PROCEDURES
-from generators import generate_patient, generate_procedure, generate_bundle, chunk_list
+from typing import Callable
+from config import BASE_URL, CLIENT_ID, CLIENT_SECRET, PROJECT_ID
+from generators import generate_bundle, chunk_list
 
 def authentication_medplum(session: requests.Session) -> str:
     token_url = f"{BASE_URL}/oauth2/token"
@@ -62,42 +63,37 @@ def send_bundle(session: requests.Session, token: str, bundle: dict) -> dict:
     response.raise_for_status()
     return response.json()
 
-def main():
-    with requests.Session() as session:
+def send_resources(
+    session: requests.Session,
+    token: str,
+    resource_type: str,
+    total_count: int,
+    generator_fn: Callable,
+    batch_size: int,
+    requires_patient: bool = True
+):
+    resources = []
+    
+    for _ in range(total_count):
         try:
-            print("Autenticando no Medplum...")
-            token = authentication_medplum(session)
-        except Exception as e:
-            print(f"Falha ao autenticar: {e}")
-            return
-
-        patients = [generate_patient() for _ in range(TOTAL_PATIENTS)]
-        for i, batch in enumerate(chunk_list(patients, BATCH_SIZE), start=1):
-            try:
-                patient_bundle = generate_bundle(batch, "Patient")
-                send_bundle(session, token, patient_bundle)
-                print(f"Lote {i} enviado com sucesso ({len(batch)} pacientes)!")
-            except Exception as e:
-                print(f"Erro no envio do Lote {i}: {e}")
-
-        procedures = []
-        for _ in range(TOTAL_PROCEDURES):
-            try:
+            if requires_patient:
                 p_id, p_name = get_random_patient(session, token)
-                proc = generate_procedure(p_id, p_name)
-                procedures.append(proc)
-            except Exception as e:
-                print(f"Erro ao sortear paciente para procedure: {e}")
+                res = generator_fn(p_id, p_name)
+            else:
+                res = generator_fn()
+                
+            resources.append(res)
+        except Exception as e:
+            print(f"Erro ao gerar {resource_type}: {e}")
 
-        if procedures:
-            for i, batch in enumerate(chunk_list(procedures, BATCH_SIZE), start=1):
-                try:
-                    proc_bundle = generate_bundle(batch, "Procedure")
-                    send_bundle(session, token, proc_bundle)
-                    print(f"Lote {i} de Procedures enviado com sucesso ({len(batch)} itens)!")
-                except Exception as e:
-                    print(f"Erro ao enviar o lote {i} de Procedures: {e}")
+    if not resources:
+        print(f"Nenhum {resource_type} gerado para envio.")
+        return
 
-
-if __name__ == "__main__":
-    main()
+    for i, batch in enumerate(chunk_list(resources, batch_size), start=1):
+        try:
+            bundle = generate_bundle(batch, resource_type)
+            send_bundle(session, token, bundle)
+            print(f"Lote {i} de {resource_type} enviado com sucesso ({len(batch)} itens)!")
+        except Exception as e:
+            print(f"Erro ao enviar o lote {i} de {resource_type}: {e}")
